@@ -4,6 +4,7 @@ import 'package:intl/intl.dart';
 
 import '../api/messages_api.dart';
 import '../api/models/message.dart';
+import '../main.dart' show AppColors;
 import '../state/app_state.dart';
 import 'message_thread_screen.dart';
 
@@ -47,10 +48,9 @@ class MessagesScreen extends ConsumerWidget {
                   ref.invalidate(messagesUnreadCountProvider);
                   await ref.read(receivedThreadsProvider.future);
                 },
-                child: ListView.separated(
-                  padding: const EdgeInsets.only(bottom: 8),
+                child: ListView.builder(
+                  padding: const EdgeInsets.fromLTRB(0, 8, 0, 8),
                   itemCount: page.threads.length,
-                  separatorBuilder: (_, _) => const Divider(height: 1),
                   itemBuilder: (context, i) =>
                       _ThreadTile(thread: page.threads[i]),
                 ),
@@ -132,81 +132,87 @@ class _ThreadTile extends ConsumerWidget {
         ? '(tuntematon)'
         : latest.sender.name;
 
-    return ListTile(
-      leading: CircleAvatar(
-        backgroundColor: _avatarColor(latest.sender.type, theme),
-        child: Icon(_avatarIcon(latest.sender.type), color: Colors.white),
-      ),
-      title: Row(
-        children: [
-          if (thread.urgent) ...[
-            const Icon(Icons.priority_high, color: Colors.red, size: 18),
-            const SizedBox(width: 4),
+    return Card(
+      margin: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+      child: ListTile(
+        leading: CircleAvatar(
+          backgroundColor: _avatarColor(latest.sender.type, theme),
+          child: Icon(_avatarIcon(latest.sender.type), color: Colors.white),
+        ),
+        title: Row(
+          children: [
+            if (thread.urgent) ...[
+              const Icon(Icons.priority_high, color: Colors.red, size: 18),
+              const SizedBox(width: 4),
+            ],
+            Expanded(
+              child: Text(
+                thread.title,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontWeight:
+                      thread.hasUnread ? FontWeight.bold : FontWeight.normal,
+                ),
+              ),
+            ),
           ],
-          Expanded(
-            child: Text(
-              thread.title,
+        ),
+        subtitle: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              senderName,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
-                fontWeight: thread.hasUnread ? FontWeight.bold : FontWeight.normal,
+                fontWeight:
+                    thread.hasUnread ? FontWeight.w600 : FontWeight.normal,
               ),
             ),
-          ),
-        ],
-      ),
-      subtitle: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            senderName,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-              fontWeight: thread.hasUnread ? FontWeight.w600 : FontWeight.normal,
+            const SizedBox(height: 2),
+            Text(
+              latest.content.replaceAll(RegExp(r'\s+'), ' '),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: theme.textTheme.bodySmall,
             ),
-          ),
-          const SizedBox(height: 2),
-          Text(
-            latest.content.replaceAll(RegExp(r'\s+'), ' '),
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-            style: theme.textTheme.bodySmall,
-          ),
-        ],
-      ),
-      trailing: Column(
-        crossAxisAlignment: CrossAxisAlignment.end,
-        mainAxisAlignment: MainAxisAlignment.start,
-        children: [
-          const SizedBox(height: 6),
-          Text(
-            _formatDate(thread.latestSentAt),
-            style: theme.textTheme.bodySmall,
-          ),
-          const SizedBox(height: 6),
-          if (thread.hasUnread)
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-              decoration: BoxDecoration(
-                color: theme.colorScheme.primary,
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: Text(
-                '${thread.unreadCount}',
-                style: const TextStyle(color: Colors.white, fontSize: 11),
-              ),
+          ],
+        ),
+        trailing: Column(
+          crossAxisAlignment: CrossAxisAlignment.end,
+          mainAxisAlignment: MainAxisAlignment.start,
+          children: [
+            const SizedBox(height: 6),
+            Text(
+              _formatDate(thread.latestSentAt),
+              style: theme.textTheme.bodySmall,
             ),
-        ],
+            const SizedBox(height: 6),
+            if (thread.hasUnread)
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(
+                  color: theme.colorScheme.primary,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Text(
+                  '${thread.unreadCount}',
+                  style: const TextStyle(color: Colors.white, fontSize: 11),
+                ),
+              ),
+          ],
+        ),
+        isThreeLine: true,
+        onTap: () {
+          Navigator.of(context).push(
+            MaterialPageRoute(
+              builder: (_) => MessageThreadScreen(thread: thread),
+            ),
+          );
+        },
       ),
-      isThreeLine: true,
-      onTap: () {
-        Navigator.of(context).push(
-          MaterialPageRoute(
-            builder: (_) => MessageThreadScreen(thread: thread),
-          ),
-        );
-      },
     );
   }
 }
@@ -214,13 +220,13 @@ class _ThreadTile extends ConsumerWidget {
 Color _avatarColor(String senderType, ThemeData theme) {
   switch (senderType) {
     case 'MUNICIPAL':
-      return Colors.indigo;
+      return AppColors.senderMunicipal;
     case 'GROUP':
-      return Colors.teal;
+      return AppColors.senderGroup;
     case 'PERSONAL':
-      return theme.colorScheme.primary;
+      return AppColors.senderPersonal;
     case 'CITIZEN':
-      return Colors.orange;
+      return AppColors.senderCitizen;
     default:
       return Colors.grey;
   }

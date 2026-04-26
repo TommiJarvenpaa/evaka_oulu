@@ -91,6 +91,7 @@ class ReservationChildDay {
     required this.shiftCare,
     required this.absence,
     required this.reservations,
+    required this.holidayPeriodEffectType,
   });
 
   final String childId;
@@ -101,10 +102,15 @@ class ReservationChildDay {
   final Absence? absence;
   final List<Reservation> reservations;
 
+  /// "ReservationsClosed" | null
+  final String? holidayPeriodEffectType;
+
   bool get hasReservation => reservations.isNotEmpty;
   bool get isAbsent => absence != null;
+  bool get reservationsClosed => holidayPeriodEffectType == 'ReservationsClosed';
 
   factory ReservationChildDay.fromJson(Map<String, dynamic> json) {
+    final holidayEffect = json['holidayPeriodEffect'] as Map<String, dynamic>?;
     return ReservationChildDay(
       childId: json['childId'] as String,
       scheduleType: (json['scheduleType'] ?? '') as String,
@@ -116,6 +122,7 @@ class ReservationChildDay {
           .cast<Map<String, dynamic>>()
           .map(Reservation.fromJson)
           .toList(),
+      holidayPeriodEffectType: holidayEffect?['type'] as String?,
     );
   }
 }

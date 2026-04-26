@@ -5,6 +5,8 @@ import 'package:intl/intl.dart';
 import '../api/models/reservations.dart';
 import '../api/reservations_api.dart';
 import '../state/app_state.dart';
+import '../widgets/child_image.dart';
+import '../widgets/day_card.dart';
 
 enum _Repetition { daily, weekly, irregular }
 
@@ -23,36 +25,22 @@ class _BulkReservationScreenState
   late Set<String> _selectedChildIds;
   DateTime? _rangeStart;
   DateTime? _rangeEnd;
-  String _absenceType = 'OTHER_ABSENCE';
   _Repetition _mode = _Repetition.daily;
 
-  // DAILY
-  TimeOfDay _dailyStart = const TimeOfDay(hour: 7, minute: 0);
-  TimeOfDay _dailyEnd = const TimeOfDay(hour: 17, minute: 0);
-  bool _dailyAbsent = false;
+  // Yksi rule kaikille päiville
+  DaySpec _daily = const DaySpec();
 
-  // WEEKLY — viikonpäiväkohtaiset ajat (1=ma … 5=pe)
-  final Map<int, bool> _weeklyEnabled = {1: true, 2: true, 3: true, 4: true, 5: true};
-  final Map<int, bool> _weeklyAbsent = {1: false, 2: false, 3: false, 4: false, 5: false};
-  final Map<int, TimeOfDay> _weeklyStarts = {
-    1: const TimeOfDay(hour: 7, minute: 0),
-    2: const TimeOfDay(hour: 7, minute: 0),
-    3: const TimeOfDay(hour: 7, minute: 0),
-    4: const TimeOfDay(hour: 7, minute: 0),
-    5: const TimeOfDay(hour: 7, minute: 0),
-  };
-  final Map<int, TimeOfDay> _weeklyEnds = {
-    1: const TimeOfDay(hour: 17, minute: 0),
-    2: const TimeOfDay(hour: 17, minute: 0),
-    3: const TimeOfDay(hour: 17, minute: 0),
-    4: const TimeOfDay(hour: 17, minute: 0),
-    5: const TimeOfDay(hour: 17, minute: 0),
+  // Viikonpäiväkohtainen (1=ma … 5=pe)
+  final Map<int, DaySpec> _weekly = {
+    1: const DaySpec(),
+    2: const DaySpec(),
+    3: const DaySpec(),
+    4: const DaySpec(),
+    5: const DaySpec(),
   };
 
-  // IRREGULAR — päiväkohtaiset ajat ja per-päivä poissaolo-toggle
-  final Map<DateTime, TimeOfDay> _irregularStarts = {};
-  final Map<DateTime, TimeOfDay> _irregularEnds = {};
-  final Set<DateTime> _irregularAbsentDays = {};
+  // Päiväkohtainen
+  final Map<DateTime, DaySpec> _irregular = {};
 
   bool _submitting = false;
   String? _error;
@@ -65,7 +53,13 @@ class _BulkReservationScreenState
 
   DateTime get _minDate {
     final now = DateTime.now();
-    return DateTime(now.year, now.month, now.day);
+    final today = DateTime(now.year, now.month, now.day);
+    final rangeStart = widget.data.reservableRange?.start;
+    if (rangeStart != null) {
+      final start = DateTime(rangeStart.year, rangeStart.month, rangeStart.day);
+      return start.isAfter(today) ? start : today;
+    }
+    return today;
   }
 
   DateTime get _maxDate {
@@ -78,9 +72,13 @@ class _BulkReservationScreenState
       .map((d) => _dateOnly(d.date))
       .toSet();
 
-  /// Päivät joille API ei palauta lasta (viikonloput, erikoispäivät)
   Set<DateTime> get _noChildDays => widget.data.days
       .where((d) => d.children.isEmpty)
+      .map((d) => _dateOnly(d.date))
+      .toSet();
+
+  Set<DateTime> get _closedDays => widget.data.days
+      .where((d) => d.children.any((c) => c.reservationsClosed))
       .map((d) => _dateOnly(d.date))
       .toSet();
 
@@ -110,22 +108,30 @@ class _BulkReservationScreenState
       initialDateRange: _rangeStart != null && _rangeEnd != null
           ? DateTimeRange(start: _rangeStart!, end: _rangeEnd!)
           : null,
-      helpText: 'Valitse aikaväli',
+      helpText: '',
       locale: const Locale('fi', 'FI'),
     );
     if (picked != null) {
       setState(() {
         _rangeStart = picked.start;
         _rangeEnd = picked.end;
-        // Esitäytä IRREGULAR-ajat oletuksilla
-        _irregularStarts.clear();
-        _irregularEnds.clear();
-        _irregularAbsentDays.clear();
+        _irregular.clear();
         for (final d in _eligibleDays()) {
-          _irregularStarts[d] = _dailyStart;
-          _irregularEnds[d] = _dailyEnd;
+          _irregular[d] = const DaySpec();
         }
       });
+    }
+  }
+
+  /// Mikä spec sovelletaan tälle päivälle? Null jos päivä ohitetaan.
+  DaySpec? _specForDay(DateTime day) {
+    switch (_mode) {
+      case _Repetition.daily:
+        return _daily;
+      case _Repetition.weekly:
+        return _weekly[day.weekday];
+      case _Repetition.irregular:
+        return _irregular[_dateOnly(day)];
     }
   }
 
@@ -151,34 +157,41 @@ class _BulkReservationScreenState
 
     try {
       final api = ref.read(reservationsApiProvider);
-
       final reservationInputs = <ReservationInput>[];
-      final absentDays = <DateTime>[];
+      // Per-päivä poissaolot ryhmiteltynä tyypin mukaan
+      final absencesByType = <String, List<DateTime>>{};
 
+      final closed = _closedDays;
       for (final d in days) {
         final spec = _specForDay(d);
-        if (spec.skip) continue;
-
-        if (spec.absent) {
-          absentDays.add(d);
-          // Tyhjennä mahdolliset olemassa olevat varaukset
-          for (final childId in _selectedChildIds) {
-            reservationInputs
-                .add(ReservationInput.clear(childId: childId, date: d));
+        if (spec == null) continue;
+        final isClosed = closed.contains(d);
+        for (final childId in _selectedChildIds) {
+          switch (spec.kind) {
+            case DayKind.present:
+              if (!isClosed) {
+                reservationInputs.add(ReservationInput.times(
+                  childId: childId,
+                  date: d,
+                  start: TimePickerField.hhmm(spec.start),
+                  end: TimePickerField.hhmm(spec.end),
+                ));
+              }
+            case DayKind.poissa:
+            case DayKind.sairas:
+            case DayKind.tyhja:
+              reservationInputs
+                  .add(ReservationInput.clear(childId: childId, date: d));
           }
-        } else {
-          for (final childId in _selectedChildIds) {
-            reservationInputs.add(ReservationInput.times(
-              childId: childId,
-              date: d,
-              start: _hhmm(spec.start!),
-              end: _hhmm(spec.end!),
-            ));
-          }
+        }
+        if (spec.kind == DayKind.poissa) {
+          absencesByType.putIfAbsent('OTHER_ABSENCE', () => []).add(d);
+        } else if (spec.kind == DayKind.sairas) {
+          absencesByType.putIfAbsent('SICKLEAVE', () => []).add(d);
         }
       }
 
-      if (reservationInputs.isEmpty && absentDays.isEmpty) {
+      if (reservationInputs.isEmpty && absencesByType.isEmpty) {
         setState(() {
           _error = 'Asetusten mukaan ei tullut yhtään merkintää';
           _submitting = false;
@@ -189,26 +202,32 @@ class _BulkReservationScreenState
       if (reservationInputs.isNotEmpty) {
         await api.postReservations(reservationInputs);
       }
-      // Poissaolot lähetetään yhtenä kutsuna per päivä (yksinkertaisuus)
-      for (final d in absentDays) {
-        await api.postAbsence(
-          childIds: _selectedChildIds.toList(),
-          start: d,
-          end: d,
-          absenceType: _absenceType,
-        );
+      // Yksi /absences-kutsu per päivä per tyyppi (yksinkertaisin)
+      int absenceCount = 0;
+      for (final entry in absencesByType.entries) {
+        for (final d in entry.value) {
+          await api.postAbsence(
+            childIds: _selectedChildIds.toList(),
+            start: d,
+            end: d,
+            absenceType: entry.key,
+          );
+          absenceCount++;
+        }
       }
 
       ref.invalidate(reservationsProvider);
       if (!mounted) return;
+      final realRes =
+          reservationInputs.where((r) => r.type != 'NOTHING').length;
       final parts = <String>[];
-      final realRes = reservationInputs
-          .where((r) => r.type != 'NOTHING')
-          .length;
       if (realRes > 0) parts.add('$realRes varausta');
-      if (absentDays.isNotEmpty) parts.add('${absentDays.length} poissaoloa');
+      if (absenceCount > 0) parts.add('$absenceCount poissaoloa');
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('${parts.join(" + ")} tallennettu')),
+        SnackBar(
+            content: Text(parts.isEmpty
+                ? 'Tallennettu'
+                : '${parts.join(" + ")} tallennettu')),
       );
       Navigator.of(context).pop();
     } catch (e) {
@@ -216,53 +235,6 @@ class _BulkReservationScreenState
         _error = 'Tallennus epäonnistui: $e';
         _submitting = false;
       });
-    }
-  }
-
-  // Vanha `_timesForDay` korvattiin `_specForDay`:llä joka tukee myös poissaoloa
-  /// Mitä tehdä yhdelle päivälle: skip (ei mitään), absent, tai times.
-  ({bool skip, bool absent, TimeOfDay? start, TimeOfDay? end}) _specForDay(
-      DateTime day) {
-    switch (_mode) {
-      case _Repetition.daily:
-        if (_dailyAbsent) return (skip: false, absent: true, start: null, end: null);
-        return (skip: false, absent: false, start: _dailyStart, end: _dailyEnd);
-      case _Repetition.weekly:
-        final wd = day.weekday;
-        if (!(_weeklyEnabled[wd] ?? false)) {
-          return (skip: true, absent: false, start: null, end: null);
-        }
-        if (_weeklyAbsent[wd] ?? false) {
-          return (skip: false, absent: true, start: null, end: null);
-        }
-        return (skip: false, absent: false,
-            start: _weeklyStarts[wd], end: _weeklyEnds[wd]);
-      case _Repetition.irregular:
-        final d = _dateOnly(day);
-        if (_irregularAbsentDays.contains(d)) {
-          return (skip: false, absent: true, start: null, end: null);
-        }
-        final s = _irregularStarts[d];
-        final e = _irregularEnds[d];
-        if (s == null || e == null) {
-          return (skip: true, absent: false, start: null, end: null);
-        }
-        return (skip: false, absent: false, start: s, end: e);
-    }
-  }
-
-  /// Onko jollain päivällä asetuksena poissaolo? Käytetään
-  /// poissaolotyypin dropdownin näkymisen päättelemiseen.
-  bool get _hasAbsenceConfigured {
-    switch (_mode) {
-      case _Repetition.daily:
-        return _dailyAbsent;
-      case _Repetition.weekly:
-        return _weeklyAbsent.entries.any(
-          (e) => (_weeklyEnabled[e.key] ?? false) && e.value,
-        );
-      case _Repetition.irregular:
-        return _irregularAbsentDays.isNotEmpty;
     }
   }
 
@@ -291,26 +263,45 @@ class _BulkReservationScreenState
         child: ListView(
           padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
           children: [
-            // LAPSET
             Text('Lapset', style: theme.textTheme.labelLarge),
             for (final c in widget.data.children)
-              CheckboxListTile(
-                title: Text(c.displayName),
-                value: _selectedChildIds.contains(c.id),
-                dense: true,
-                controlAffinity: ListTileControlAffinity.leading,
-                contentPadding: EdgeInsets.zero,
-                onChanged: (v) => setState(() {
-                  if (v == true) {
-                    _selectedChildIds.add(c.id);
-                  } else {
+              InkWell(
+                onTap: () => setState(() {
+                  if (_selectedChildIds.contains(c.id)) {
                     _selectedChildIds.remove(c.id);
+                  } else {
+                    _selectedChildIds.add(c.id);
                   }
                 }),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 4),
+                  child: Row(
+                    children: [
+                      Checkbox(
+                        value: _selectedChildIds.contains(c.id),
+                        onChanged: (v) => setState(() {
+                          if (v == true) {
+                            _selectedChildIds.add(c.id);
+                          } else {
+                            _selectedChildIds.remove(c.id);
+                          }
+                        }),
+                        visualDensity: VisualDensity.compact,
+                      ),
+                      ChildImage(
+                        imageId: c.imageId,
+                        fallbackLetter:
+                            c.displayName.isNotEmpty ? c.displayName[0] : '?',
+                        radius: 14,
+                      ),
+                      const SizedBox(width: 8),
+                      Text(c.displayName),
+                    ],
+                  ),
+                ),
               ),
             const SizedBox(height: 16),
 
-            // PÄIVÄMÄÄRÄVÄLI
             Text('Aikaväli', style: theme.textTheme.labelLarge),
             const SizedBox(height: 4),
             OutlinedButton.icon(
@@ -339,64 +330,28 @@ class _BulkReservationScreenState
                 ),
               ),
             ],
-            const SizedBox(height: 16),
-
-            // TOISTUMISTYYPPI
-            Text('Miten kellonaika toistuu',
-                style: theme.textTheme.labelLarge),
-            const SizedBox(height: 4),
-            SegmentedButton<_Repetition>(
-              segments: const [
-                ButtonSegment(
-                  value: _Repetition.daily,
-                  label: Text('Päivä'),
-                ),
-                ButtonSegment(
-                  value: _Repetition.weekly,
-                  label: Text('Viikko'),
-                ),
-                ButtonSegment(
-                  value: _Repetition.irregular,
-                  label: Text('Vaihtuva'),
-                ),
-              ],
-              selected: {_mode},
-              showSelectedIcon: false,
-              onSelectionChanged: (s) => setState(() => _mode = s.first),
-            ),
-            const SizedBox(height: 16),
-            if (_mode == _Repetition.daily) _dailySection(),
-            if (_mode == _Repetition.weekly) _weeklySection(),
-            if (_mode == _Repetition.irregular) _irregularSection(),
-
-            // POISSAOLON TYYPPI näkyy aina kun joku rivi/päivä on Poissa
-            if (_hasAbsenceConfigured) ...[
+            if (_rangeStart != null && _rangeEnd != null) ...[
               const SizedBox(height: 16),
-              Text('Poissaolon tyyppi', style: theme.textTheme.labelLarge),
+              Text('Miten kellonaika toistuu',
+                  style: theme.textTheme.labelLarge),
               const SizedBox(height: 4),
-              DropdownButtonFormField<String>(
-                initialValue: _absenceType,
-                decoration: const InputDecoration(
-                  border: OutlineInputBorder(),
-                  isDense: true,
-                ),
-                items: const [
-                  DropdownMenuItem(
-                      value: 'OTHER_ABSENCE', child: Text('Poissaolo')),
-                  DropdownMenuItem(
-                      value: 'SICKLEAVE', child: Text('Sairaus')),
+              SegmentedButton<_Repetition>(
+                segments: const [
+                  ButtonSegment(
+                      value: _Repetition.daily, label: Text('Päivä')),
+                  ButtonSegment(
+                      value: _Repetition.weekly, label: Text('Viikko')),
+                  ButtonSegment(
+                      value: _Repetition.irregular, label: Text('Vaihtuva')),
                 ],
-                onChanged: (v) => setState(
-                  () => _absenceType = v ?? 'OTHER_ABSENCE',
-                ),
+                selected: {_mode},
+                showSelectedIcon: false,
+                onSelectionChanged: (s) => setState(() => _mode = s.first),
               ),
-              const SizedBox(height: 8),
-              Text(
-                'Mahdolliset olemassa olevat varaukset poistetaan ennen poissaolon merkitsemistä.',
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: theme.colorScheme.onSurfaceVariant,
-                ),
-              ),
+              const SizedBox(height: 16),
+              if (_mode == _Repetition.daily) _dailySection(),
+              if (_mode == _Repetition.weekly) _weeklySection(),
+              if (_mode == _Repetition.irregular) _irregularSection(),
             ],
 
             if (_error != null) ...[
@@ -410,116 +365,32 @@ class _BulkReservationScreenState
   }
 
   Widget _dailySection() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        SegmentedButton<bool>(
-          segments: const [
-            ButtonSegment(value: false, label: Text('Saapuu')),
-            ButtonSegment(value: true, label: Text('Poissa')),
-          ],
-          selected: {_dailyAbsent},
-          onSelectionChanged: (s) =>
-              setState(() => _dailyAbsent = s.first),
-        ),
-        const SizedBox(height: 12),
-        if (!_dailyAbsent)
-          Row(
-            children: [
-              Expanded(
-                child: _TimeField(
-                  label: 'Alkaa',
-                  value: _dailyStart,
-                  onChanged: (v) => setState(() => _dailyStart = v),
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: _TimeField(
-                  label: 'Päättyy',
-                  value: _dailyEnd,
-                  onChanged: (v) => setState(() => _dailyEnd = v),
-                ),
-              ),
-            ],
-          ),
-      ],
+    return DayCard(
+      title: 'Sama merkintä kaikille arkipäiville',
+      subtitle: _rangeStart != null
+          ? '${_eligibleDays().length} päivää valitulla aikavälillä'
+          : 'Valitse aikaväli',
+      spec: _daily,
+      onChanged: (s) => setState(() => _daily = s),
     );
   }
 
   Widget _weeklySection() {
-    const names = {1: 'Maanantai', 2: 'Tiistai', 3: 'Keskiviikko',
-                   4: 'Torstai', 5: 'Perjantai'};
-    // Vain ne viikonpäivät jotka esiintyvät valitulla päivämääräalueella
+    const fullNames = {1: 'Maanantai', 2: 'Tiistai', 3: 'Keskiviikko',
+                       4: 'Torstai', 5: 'Perjantai'};
     final activeWeekdays = _eligibleDays().map((d) => d.weekday).toSet();
     final visible = activeWeekdays.isEmpty
         ? const [1, 2, 3, 4, 5]
         : ([1, 2, 3, 4, 5]..removeWhere((wd) => !activeWeekdays.contains(wd)));
+
     return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         for (int wd in visible)
-          Padding(
-            padding: const EdgeInsets.only(bottom: 12),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Checkbox(
-                      value: _weeklyEnabled[wd] ?? false,
-                      onChanged: (v) => setState(
-                        () => _weeklyEnabled[wd] = v ?? false,
-                      ),
-                    ),
-                    Expanded(
-                      child: Text(names[wd]!,
-                          style: Theme.of(context).textTheme.labelLarge),
-                    ),
-                    if (_weeklyEnabled[wd] == true)
-                      SegmentedButton<bool>(
-                        segments: const [
-                          ButtonSegment(value: false, label: Text('Saapuu')),
-                          ButtonSegment(value: true, label: Text('Poissa')),
-                        ],
-                        selected: {_weeklyAbsent[wd] ?? false},
-                        style: const ButtonStyle(
-                          visualDensity: VisualDensity.compact,
-                        ),
-                        onSelectionChanged: (s) => setState(
-                          () => _weeklyAbsent[wd] = s.first,
-                        ),
-                      ),
-                  ],
-                ),
-                if (_weeklyEnabled[wd] == true && !(_weeklyAbsent[wd] ?? false))
-                  Padding(
-                    padding: const EdgeInsets.only(left: 32),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: _TimeField(
-                            label: 'Alkaa',
-                            value: _weeklyStarts[wd]!,
-                            onChanged: (v) => setState(
-                              () => _weeklyStarts[wd] = v,
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: _TimeField(
-                            label: 'Päättyy',
-                            value: _weeklyEnds[wd]!,
-                            onChanged: (v) => setState(
-                              () => _weeklyEnds[wd] = v,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-              ],
-            ),
+          DayCard(
+            title: fullNames[wd]!,
+            spec: _weekly[wd]!,
+            onChanged: (s) => setState(() => _weekly[wd] = s),
           ),
       ],
     );
@@ -533,137 +404,23 @@ class _BulkReservationScreenState
         style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
       );
     }
-    final theme = Theme.of(context);
+    final closed = _closedDays;
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         for (final d in days)
-          Padding(
-            padding: const EdgeInsets.only(bottom: 12),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        _capitalize(
-                          DateFormat('EEEE d.M.', 'fi_FI').format(d),
-                        ),
-                        style: theme.textTheme.labelLarge,
-                      ),
-                    ),
-                    SegmentedButton<bool>(
-                      segments: const [
-                        ButtonSegment(value: false, label: Text('Saapuu')),
-                        ButtonSegment(value: true, label: Text('Poissa')),
-                      ],
-                      selected: {_irregularAbsentDays.contains(d)},
-                      style: const ButtonStyle(
-                        visualDensity: VisualDensity.compact,
-                      ),
-                      onSelectionChanged: (s) => setState(() {
-                        if (s.first) {
-                          _irregularAbsentDays.add(d);
-                        } else {
-                          _irregularAbsentDays.remove(d);
-                        }
-                      }),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 4),
-                if (!_irregularAbsentDays.contains(d))
-                  Row(
-                    children: [
-                      Expanded(
-                        child: _TimeField(
-                          label: 'Alkaa',
-                          value: _irregularStarts[d] ?? _dailyStart,
-                          onChanged: (v) => setState(
-                            () => _irregularStarts[d] = v,
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: _TimeField(
-                          label: 'Päättyy',
-                          value: _irregularEnds[d] ?? _dailyEnd,
-                          onChanged: (v) => setState(
-                            () => _irregularEnds[d] = v,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-              ],
-            ),
+          DayCard(
+            title: _capitalize(DateFormat('EEEE d.M.', 'fi_FI').format(d)),
+            spec: _irregular[d] ?? const DaySpec(),
+            onChanged: (s) => setState(() => _irregular[d] = s),
+            timesEditable: !closed.contains(d),
           ),
-        if (_irregularAbsentDays.isNotEmpty) ...[
-          const SizedBox(height: 8),
-          Text('Poissaolon tyyppi (rastituille päiville)',
-              style: theme.textTheme.labelLarge),
-          const SizedBox(height: 4),
-          DropdownButtonFormField<String>(
-            initialValue: _absenceType,
-            decoration: const InputDecoration(
-              border: OutlineInputBorder(),
-              isDense: true,
-            ),
-            items: const [
-              DropdownMenuItem(
-                  value: 'OTHER_ABSENCE', child: Text('Poissaolo')),
-              DropdownMenuItem(value: 'SICKLEAVE', child: Text('Sairaus')),
-            ],
-            onChanged: (v) => setState(
-              () => _absenceType = v ?? 'OTHER_ABSENCE',
-            ),
-          ),
-        ],
       ],
     );
   }
 }
 
-class _TimeField extends StatelessWidget {
-  const _TimeField({
-    required this.label,
-    required this.value,
-    required this.onChanged,
-  });
-
-  final String label;
-  final TimeOfDay value;
-  final ValueChanged<TimeOfDay> onChanged;
-
-  @override
-  Widget build(BuildContext context) {
-    return InkWell(
-      onTap: () async {
-        final picked = await showTimePicker(
-          context: context,
-          initialTime: value,
-          initialEntryMode: TimePickerEntryMode.input,
-        );
-        if (picked != null) onChanged(picked);
-      },
-      child: InputDecorator(
-        decoration: InputDecoration(
-          labelText: label,
-          border: const OutlineInputBorder(),
-          isDense: true,
-        ),
-        child: Text(_hhmm(value)),
-      ),
-    );
-  }
-}
-
 DateTime _dateOnly(DateTime d) => DateTime(d.year, d.month, d.day);
-
-String _hhmm(TimeOfDay t) =>
-    '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
 
 String _capitalize(String s) =>
     s.isEmpty ? s : '${s[0].toUpperCase()}${s.substring(1)}';

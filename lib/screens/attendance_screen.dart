@@ -6,6 +6,7 @@ import '../api/models/reservations.dart';
 import '../api/reservations_api.dart';
 import '../state/app_state.dart';
 import '../widgets/child_image.dart';
+import '../widgets/day_card.dart';
 import 'bulk_reservation_screen.dart';
 
 class AttendanceScreen extends ConsumerWidget {
@@ -73,7 +74,11 @@ class _ReservationsList extends ConsumerWidget {
         itemCount: data.days.length,
         itemBuilder: (context, i) {
           final day = data.days[i];
-          return _DayCard(day: day, childrenById: childrenById);
+          return _DayCard(
+            day: day,
+            childrenById: childrenById,
+            reservableRange: data.reservableRange,
+          );
         },
       ),
     );
@@ -81,10 +86,15 @@ class _ReservationsList extends ConsumerWidget {
 }
 
 class _DayCard extends ConsumerWidget {
-  const _DayCard({required this.day, required this.childrenById});
+  const _DayCard({
+    required this.day,
+    required this.childrenById,
+    required this.reservableRange,
+  });
 
   final ReservationDay day;
   final Map<String, ReservationChild> childrenById;
+  final DateRange? reservableRange;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -95,6 +105,11 @@ class _DayCard extends ConsumerWidget {
     final isWeekend = day.date.weekday == DateTime.saturday ||
         day.date.weekday == DateTime.sunday;
     final notReservable = day.holiday || day.children.isEmpty;
+    final hasLockedTimes = !notReservable &&
+        (day.children.any((c) => c.reservationsClosed) ||
+            (reservableRange != null &&
+                (day.date.isBefore(reservableRange!.start) ||
+                    day.date.isAfter(reservableRange!.end))));
 
     return Card(
       margin: const EdgeInsets.fromLTRB(12, 8, 12, 0),
@@ -102,13 +117,15 @@ class _DayCard extends ConsumerWidget {
       child: InkWell(
         onTap: notReservable
             ? null
-            : () => _openEditSheet(context, ref, day, childrenById),
+            : () => _openEditSheet(context, ref, day, childrenById, reservableRange),
         child: Padding(
           padding: const EdgeInsets.all(12),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Row(
+              Wrap(
+                spacing: 8,
+                crossAxisAlignment: WrapCrossAlignment.center,
                 children: [
                   Text(
                     '${_capitalize(weekday)} $dateStr',
@@ -121,33 +138,31 @@ class _DayCard extends ConsumerWidget {
                               : null),
                     ),
                   ),
-                  if (day.holiday) ...[
-                    const SizedBox(width: 8),
+                  if (day.holiday)
                     const Chip(
                       label: Text('Pyhäpäivä'),
                       visualDensity: VisualDensity.compact,
                       padding: EdgeInsets.zero,
-                      materialTapTargetSize:
-                          MaterialTapTargetSize.shrinkWrap,
+                      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
                     ),
-                  ],
-                  if (isWeekend && !day.holiday) ...[
-                    const SizedBox(width: 8),
+                  if (isWeekend && !day.holiday)
                     const Chip(
                       label: Text('Viikonloppu'),
                       visualDensity: VisualDensity.compact,
                       padding: EdgeInsets.zero,
-                      materialTapTargetSize:
-                          MaterialTapTargetSize.shrinkWrap,
+                      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
                     ),
-                  ],
-                  if (isToday) ...[
-                    const SizedBox(width: 8),
+                  if (isToday)
                     Text('tänään',
                         style: theme.textTheme.bodySmall?.copyWith(
                           color: theme.colorScheme.primary,
                         )),
-                  ],
+                  if (hasLockedTimes)
+                    Icon(
+                      Icons.lock_outline,
+                      size: 16,
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
                 ],
               ),
               if (day.children.isNotEmpty) ...[
@@ -238,62 +253,82 @@ Future<void> _openEditSheet(
   WidgetRef ref,
   ReservationDay day,
   Map<String, ReservationChild> childrenById,
+  DateRange? reservableRange,
 ) async {
   await showModalBottomSheet<void>(
     context: context,
     isScrollControlled: true,
     showDragHandle: true,
-    builder: (ctx) => _EditSheet(day: day, childrenById: childrenById),
+    builder: (ctx) => _EditSheet(
+      day: day,
+      childrenById: childrenById,
+      reservableRange: reservableRange,
+    ),
   );
 }
 
 class _EditSheet extends ConsumerStatefulWidget {
-  const _EditSheet({required this.day, required this.childrenById});
+  const _EditSheet({
+    required this.day,
+    required this.childrenById,
+    required this.reservableRange,
+  });
 
   final ReservationDay day;
   final Map<String, ReservationChild> childrenById;
+  final DateRange? reservableRange;
 
   @override
   ConsumerState<_EditSheet> createState() => _EditSheetState();
 }
 
-enum _Mode { reservation, absence, clear }
-
 class _EditSheetState extends ConsumerState<_EditSheet> {
-  _Mode _mode = _Mode.reservation;
-  TimeOfDay _start = const TimeOfDay(hour: 7, minute: 0);
-  TimeOfDay _end = const TimeOfDay(hour: 17, minute: 0);
-  bool _sameTimeForAll = true;
-  final Map<String, TimeOfDay> _childStarts = {};
-  final Map<String, TimeOfDay> _childEnds = {};
-  String _absenceType = 'OTHER_ABSENCE';
-  late Set<String> _selectedChildIds;
+  late Map<String, DaySpec> _childSpecs;
   bool _submitting = false;
   String? _error;
 
   @override
   void initState() {
     super.initState();
-    _selectedChildIds =
-        widget.day.children.map((c) => c.childId).toSet();
-    // Esitäytä per-lapsi ajat olemassa olevista varauksista tai oletuksista
+    _childSpecs = {};
     for (final cd in widget.day.children) {
-      final r = cd.reservations.isNotEmpty ? cd.reservations.first : null;
-      if (r?.type == 'TIMES' && r?.start != null && r?.end != null) {
-        _childStarts[cd.childId] = _parseHHmm(r!.start!) ?? _start;
-        _childEnds[cd.childId] = _parseHHmm(r.end!) ?? _end;
-      } else {
-        _childStarts[cd.childId] = _start;
-        _childEnds[cd.childId] = _end;
-      }
+      _childSpecs[cd.childId] = _specFromExisting(cd);
     }
   }
 
-  Future<void> _submit() async {
-    if (_selectedChildIds.isEmpty) {
-      setState(() => _error = 'Valitse vähintään yksi lapsi');
-      return;
+  bool _timesEditable(ReservationChildDay cd) {
+    if (cd.reservationsClosed) return false;
+    final range = widget.reservableRange;
+    if (range != null) {
+      final d = widget.day.date;
+      if (d.isBefore(range.start) || d.isAfter(range.end)) return false;
     }
+    return true;
+  }
+
+  DaySpec _specFromExisting(ReservationChildDay cd) {
+    if (cd.absence != null) {
+      final kind = cd.absence!.type == 'SICKLEAVE'
+          ? DayKind.sairas
+          : DayKind.poissa;
+      return DaySpec(kind: kind);
+    }
+    if (cd.reservations.isNotEmpty) {
+      final r = cd.reservations.first;
+      if (r.type == 'TIMES' && r.start != null && r.end != null) {
+        return DaySpec(
+          kind: DayKind.present,
+          start: _parseHHmm(r.start!) ??
+              const TimeOfDay(hour: 7, minute: 0),
+          end: _parseHHmm(r.end!) ??
+              const TimeOfDay(hour: 17, minute: 0),
+        );
+      }
+    }
+    return const DaySpec();
+  }
+
+  Future<void> _submit() async {
     setState(() {
       _submitting = true;
       _error = null;
@@ -301,40 +336,50 @@ class _EditSheetState extends ConsumerState<_EditSheet> {
     try {
       final api = ref.read(reservationsApiProvider);
       final date = widget.day.date;
-      final ids = _selectedChildIds.toList();
 
-      switch (_mode) {
-        case _Mode.reservation:
-          await api.postReservations([
-            for (final id in ids)
-              ReservationInput.times(
-                childId: id,
-                date: date,
-                start: _sameTimeForAll
-                    ? _hhmm(_start)
-                    : _hhmm(_childStarts[id] ?? _start),
-                end: _sameTimeForAll
-                    ? _hhmm(_end)
-                    : _hhmm(_childEnds[id] ?? _end),
-              ),
-          ]);
-        case _Mode.clear:
-          await api.postReservations([
-            for (final id in ids)
-              ReservationInput.clear(childId: id, date: date),
-          ]);
-        case _Mode.absence:
-          // Tyhjennä mahdolliset varaukset ensin, sitten merkkaa poissaolo
-          await api.postReservations([
-            for (final id in ids)
-              ReservationInput.clear(childId: id, date: date),
-          ]);
-          await api.postAbsence(
-            childIds: ids,
-            start: date,
-            end: date,
-            absenceType: _absenceType,
-          );
+      final reservationInputs = <ReservationInput>[];
+      // Lähetään yksi /absences-kutsu per (childId, tyyppi) -kombo päivälle
+      final absences = <(String childId, String type)>[];
+
+      for (final cd in widget.day.children) {
+        final spec = _childSpecs[cd.childId];
+        if (spec == null) continue;
+        switch (spec.kind) {
+          case DayKind.present:
+            reservationInputs.add(ReservationInput.times(
+              childId: cd.childId,
+              date: date,
+              start: TimePickerField.hhmm(spec.start),
+              end: TimePickerField.hhmm(spec.end),
+            ));
+          case DayKind.poissa:
+          case DayKind.sairas:
+          case DayKind.tyhja:
+            reservationInputs
+                .add(ReservationInput.clear(childId: cd.childId, date: date));
+        }
+        if (spec.kind == DayKind.poissa) {
+          absences.add((cd.childId, 'OTHER_ABSENCE'));
+        } else if (spec.kind == DayKind.sairas) {
+          absences.add((cd.childId, 'SICKLEAVE'));
+        }
+      }
+
+      if (reservationInputs.isNotEmpty) {
+        await api.postReservations(reservationInputs);
+      }
+      // Niputa poissaolot tyypin mukaan: yksi kutsu per tyyppi
+      final byType = <String, List<String>>{};
+      for (final (id, type) in absences) {
+        byType.putIfAbsent(type, () => []).add(id);
+      }
+      for (final entry in byType.entries) {
+        await api.postAbsence(
+          childIds: entry.value,
+          start: date,
+          end: date,
+          absenceType: entry.key,
+        );
       }
 
       ref.invalidate(reservationsProvider);
@@ -350,231 +395,102 @@ class _EditSheetState extends ConsumerState<_EditSheet> {
 
   @override
   Widget build(BuildContext context) {
-    final dateStr = DateFormat(
-      "EEEE d.M.yyyy",
-      'fi_FI',
-    ).format(widget.day.date);
-    final children = widget.day.children
-        .map((cd) => widget.childrenById[cd.childId])
-        .whereType<ReservationChild>()
-        .toList();
+    final theme = Theme.of(context);
+    final dateStr = DateFormat("EEEE d.M.yyyy", 'fi_FI').format(widget.day.date);
 
     return SafeArea(
       top: false,
       child: Padding(
-      padding: EdgeInsets.only(
-        left: 16,
-        right: 16,
-        top: 8,
-        bottom: MediaQuery.of(context).viewInsets.bottom + 16,
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(_capitalize(dateStr),
-              style: Theme.of(context).textTheme.titleLarge),
-          const SizedBox(height: 12),
-          SegmentedButton<_Mode>(
-            segments: const [
-              ButtonSegment(
-                value: _Mode.reservation,
-                icon: Icon(Icons.event_available),
-                label: Text('Varaus'),
-              ),
-              ButtonSegment(
-                value: _Mode.absence,
-                icon: Icon(Icons.event_busy),
-                label: Text('Poissa'),
-              ),
-              ButtonSegment(
-                value: _Mode.clear,
-                icon: Icon(Icons.delete_outline),
-                label: Text('Tyhjä'),
-              ),
-            ],
-            selected: {_mode},
-            onSelectionChanged: (s) => setState(() => _mode = s.first),
-          ),
-          const SizedBox(height: 16),
-          Text('Lapset', style: Theme.of(context).textTheme.labelLarge),
-          for (final c in children)
-            CheckboxListTile(
-              title: Text(c.displayName),
-              subtitle: c.upcomingPlacementUnitName != null
-                  ? Text(c.upcomingPlacementUnitName!,
-                      style: Theme.of(context).textTheme.bodySmall)
-                  : null,
-              value: _selectedChildIds.contains(c.id),
-              dense: true,
-              controlAffinity: ListTileControlAffinity.leading,
-              onChanged: (v) => setState(() {
-                if (v == true) {
-                  _selectedChildIds.add(c.id);
-                } else {
-                  _selectedChildIds.remove(c.id);
-                }
-              }),
-            ),
-          const SizedBox(height: 8),
-          if (_mode == _Mode.reservation) _reservationTimeSection(children),
-          if (_mode == _Mode.absence) _absenceTypeRow(),
-          if (_error != null) ...[
-            const SizedBox(height: 8),
-            Text(_error!, style: const TextStyle(color: Colors.red)),
-          ],
-          const SizedBox(height: 16),
-          Row(
+        padding: EdgeInsets.only(
+          left: 16,
+          right: 16,
+          top: 8,
+          bottom: MediaQuery.of(context).viewInsets.bottom + 16,
+        ),
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Expanded(
-                child: OutlinedButton(
-                  onPressed:
-                      _submitting ? null : () => Navigator.of(context).pop(),
-                  child: const Text('Peruuta'),
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: FilledButton(
-                  onPressed: _submitting ? null : _submit,
-                  child: _submitting
-                      ? const SizedBox(
-                          height: 20,
-                          width: 20,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Text('Tallenna'),
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
-    ),
-    );
-  }
-
-  Widget _reservationTimeSection(List<ReservationChild> children) {
-    final showPerChildToggle = _selectedChildIds.length > 1;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        if (showPerChildToggle)
-          SwitchListTile(
-            title: const Text('Sama aika kaikille lapsille'),
-            value: _sameTimeForAll,
-            dense: true,
-            contentPadding: EdgeInsets.zero,
-            onChanged: (v) => setState(() => _sameTimeForAll = v),
-          ),
-        if (_sameTimeForAll || _selectedChildIds.length <= 1)
-          Row(
-            children: [
-              Expanded(
-                child: _TimeField(
-                  label: 'Alkaa',
-                  value: _start,
-                  onChanged: (v) => setState(() => _start = v),
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: _TimeField(
-                  label: 'Päättyy',
-                  value: _end,
-                  onChanged: (v) => setState(() => _end = v),
-                ),
-              ),
-            ],
-          )
-        else
-          ...children.where((c) => _selectedChildIds.contains(c.id)).map(
-                (c) => Padding(
-                  padding: const EdgeInsets.only(top: 8),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+              Text(_capitalize(dateStr), style: theme.textTheme.titleLarge),
+              if (widget.day.children.any((cd) => !_timesEditable(cd))) ...[
+                const SizedBox(height: 10),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 12, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: Colors.amber.shade50,
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: Colors.amber.shade300),
+                  ),
+                  child: Row(
                     children: [
-                      Text(
-                        c.displayName,
-                        style: Theme.of(context).textTheme.labelLarge,
-                      ),
-                      const SizedBox(height: 4),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: _TimeField(
-                              label: 'Alkaa',
-                              value: _childStarts[c.id] ?? _start,
-                              onChanged: (v) => setState(
-                                () => _childStarts[c.id] = v,
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: _TimeField(
-                              label: 'Päättyy',
-                              value: _childEnds[c.id] ?? _end,
-                              onChanged: (v) => setState(
-                                () => _childEnds[c.id] = v,
-                              ),
-                            ),
-                          ),
-                        ],
+                      Icon(Icons.lock_outline,
+                          size: 16, color: Colors.amber.shade800),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'Varausaika suljettu – voit muokata vain poissaoloja.',
+                          style: TextStyle(
+                              fontSize: 13, color: Colors.amber.shade900),
+                        ),
                       ),
                     ],
                   ),
                 ),
+              ],
+              const SizedBox(height: 12),
+              for (final cd in widget.day.children)
+                _childCard(cd),
+              if (_error != null) ...[
+                const SizedBox(height: 8),
+                Text(_error!, style: const TextStyle(color: Colors.red)),
+              ],
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: _submitting
+                          ? null
+                          : () => Navigator.of(context).pop(),
+                      child: const Text('Peruuta'),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: FilledButton(
+                      onPressed: _submitting ? null : _submit,
+                      child: _submitting
+                          ? const SizedBox(
+                              height: 20,
+                              width: 20,
+                              child:
+                                  CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Text('Tallenna'),
+                    ),
+                  ),
+                ],
               ),
-      ],
-    );
-  }
-
-  Widget _absenceTypeRow() {
-    return DropdownButtonFormField<String>(
-      initialValue: _absenceType,
-      decoration: const InputDecoration(
-        labelText: 'Poissaolon tyyppi',
-        border: OutlineInputBorder(),
-      ),
-      items: const [
-        DropdownMenuItem(value: 'OTHER_ABSENCE', child: Text('Poissaolo')),
-        DropdownMenuItem(value: 'SICKLEAVE', child: Text('Sairaus')),
-      ],
-      onChanged: (v) => setState(() => _absenceType = v ?? 'OTHER_ABSENCE'),
-    );
-  }
-}
-
-class _TimeField extends StatelessWidget {
-  const _TimeField({
-    required this.label,
-    required this.value,
-    required this.onChanged,
-  });
-
-  final String label;
-  final TimeOfDay value;
-  final ValueChanged<TimeOfDay> onChanged;
-
-  @override
-  Widget build(BuildContext context) {
-    return InkWell(
-      onTap: () async {
-        final picked = await showTimePicker(
-          context: context,
-          initialTime: value,
-          initialEntryMode: TimePickerEntryMode.input,
-        );
-        if (picked != null) onChanged(picked);
-      },
-      child: InputDecorator(
-        decoration: InputDecoration(
-          labelText: label,
-          border: const OutlineInputBorder(),
+            ],
+          ),
         ),
-        child: Text(_hhmm(value)),
       ),
+    );
+  }
+
+  Widget _childCard(ReservationChildDay cd) {
+    final child = widget.childrenById[cd.childId];
+    final name = child?.displayName ?? '(lapsi)';
+    final initial = name.isNotEmpty ? name[0].toUpperCase() : '?';
+    return DayCard(
+      shortBadge: initial,
+      title: name,
+      subtitle: child?.upcomingPlacementUnitName,
+      spec: _childSpecs[cd.childId] ?? const DaySpec(),
+      onChanged: (s) => setState(() => _childSpecs[cd.childId] = s),
+      timesEditable: _timesEditable(cd),
     );
   }
 }
@@ -589,9 +505,6 @@ String _trimSeconds(String t) {
   // "07:00" or "07:00:00" → "07:00"
   return t.length >= 5 ? t.substring(0, 5) : t;
 }
-
-String _hhmm(TimeOfDay t) =>
-    '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
 
 TimeOfDay? _parseHHmm(String s) {
   // "07:00" tai "07:00:00"
