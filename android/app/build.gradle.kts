@@ -5,17 +5,18 @@ plugins {
     id("dev.flutter.flutter-gradle-plugin")
 }
 
-fun gitVersionCode(): Int {
-    return Runtime.getRuntime().exec(arrayOf("git", "rev-list", "HEAD", "--count"))
-        .inputStream.bufferedReader().readText().trim().toIntOrNull() ?: 1
+fun git(vararg args: String): String {
+    val cmd = arrayOf("git") + args
+    val proc = Runtime.getRuntime().exec(cmd, null, rootProject.projectDir)
+    return proc.inputStream.bufferedReader().readText().trim()
 }
 
+fun gitVersionCode(): Int = git("rev-list", "HEAD", "--count").toIntOrNull() ?: 1
+
 fun gitVersionName(): String {
-    val tag = Runtime.getRuntime().exec(arrayOf("git", "describe", "--tags", "--abbrev=0"))
-        .inputStream.bufferedReader().readText().trim()
+    val tag = git("describe", "--tags", "--abbrev=0")
     if (tag.isEmpty()) return "0.1.${gitVersionCode()}"
-    val commitsSinceTag = Runtime.getRuntime().exec(arrayOf("git", "rev-list", "$tag..HEAD", "--count"))
-        .inputStream.bufferedReader().readText().trim().toIntOrNull() ?: 0
+    val commitsSinceTag = git("rev-list", "$tag..HEAD", "--count").toIntOrNull() ?: 0
     return "$tag.$commitsSinceTag"
 }
 
@@ -49,13 +50,6 @@ android {
             // TODO: Add your own signing config for the release build.
             // Signing with the debug keys for now, so `flutter run --release` works.
             signingConfig = signingConfigs.getByName("debug")
-        }
-    }
-
-    applicationVariants.all {
-        outputs.all {
-            (this as com.android.build.gradle.internal.api.BaseVariantOutputImpl).outputFileName =
-                "eVaka-Oulu-${versionName}.apk"
         }
     }
 }
