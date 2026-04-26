@@ -5,6 +5,20 @@ plugins {
     id("dev.flutter.flutter-gradle-plugin")
 }
 
+fun gitVersionCode(): Int {
+    return Runtime.getRuntime().exec(arrayOf("git", "rev-list", "HEAD", "--count"))
+        .inputStream.bufferedReader().readText().trim().toIntOrNull() ?: 1
+}
+
+fun gitVersionName(): String {
+    val tag = Runtime.getRuntime().exec(arrayOf("git", "describe", "--tags", "--abbrev=0"))
+        .inputStream.bufferedReader().readText().trim()
+    if (tag.isEmpty()) return "0.1.${gitVersionCode()}"
+    val commitsSinceTag = Runtime.getRuntime().exec(arrayOf("git", "rev-list", "$tag..HEAD", "--count"))
+        .inputStream.bufferedReader().readText().trim().toIntOrNull() ?: 0
+    return "$tag.$commitsSinceTag"
+}
+
 android {
     namespace = "fi.tommijarvenpaa.evaka_oulu"
     compileSdk = flutter.compileSdkVersion
@@ -26,8 +40,8 @@ android {
         // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
-        versionCode = flutter.versionCode
-        versionName = flutter.versionName
+        versionCode = gitVersionCode()
+        versionName = gitVersionName()
     }
 
     buildTypes {
