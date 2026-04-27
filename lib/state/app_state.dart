@@ -5,7 +5,9 @@ import '../api/calendar_api.dart';
 import '../api/evaka_client.dart';
 import '../api/messages_api.dart';
 import '../api/models/calendar_event.dart';
+import '../api/models/questionnaire.dart';
 import '../api/models/reservations.dart';
+import '../api/questionnaire_api.dart';
 import '../api/reservations_api.dart';
 import '../auth/auth_service.dart';
 import '../auth/secure_storage.dart';
@@ -77,4 +79,13 @@ final calendarEventsProvider =
   return ref
       .watch(calendarApiProvider)
       .getEvents(start: today, end: end);
+});
+
+final questionnaireApiProvider = Provider<QuestionnaireApi>((ref) {
+  return QuestionnaireApi(ref.watch(evakaClientProvider));
+});
+
+final activeQuestionnairesProvider =
+    FutureProvider<List<HolidayQuestionnaire>>((ref) async {
+  return ref.watch(questionnaireApiProvider).getActiveQuestionnaires();
 });

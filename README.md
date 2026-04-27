@@ -1,17 +1,47 @@
-# evaka_oulu
+# eVaka Oulu — epävirallinen mobiilisovellus
 
-A new Flutter project.
+Epävirallinen Flutter-asiakas Oulun varhaiskasvatuksen eVaka-palvelulle
+([varhaiskasvatus.ouka.fi](https://varhaiskasvatus.ouka.fi)).
 
-## Getting Started
+> **Huom:** Tämä on henkilökohtainen harrastusprojekti. Se ei ole Oulun kaupungin
+> tai Espoo Voltin virallinen sovellus eikä ole millään tavalla heidän tukemanaan.
 
-This project is a starting point for a Flutter application.
+## Ominaisuudet
 
-A few resources to get you started if this is your first Flutter project:
+| Ominaisuus | Tila |
+|---|---|
+| Kirjautuminen sähköpostilla ja salasanalla | ✅ |
+| Viestit — selaus, luku, vastaaminen | ✅ |
+| Läsnäolo — varaukset, poissaolot, massailmoitus | ✅ |
+| Kalenteri — päiväkotitapahtumat | ✅ |
+| Keskusteluaikavaraukset (DISCUSSION_SURVEY) | ✅ |
+| Poissaolokysely (kesä ym. loma-ajat) | ✅ |
 
-- [Learn Flutter](https://docs.flutter.dev/get-started/learn-flutter)
-- [Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Flutter learning resources](https://docs.flutter.dev/reference/learning-resources)
+## Nopea käynnistys
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+```bash
+# Vaatii Flutter SDK ≥ 3.11
+flutter pub get
+flutter run
+```
+
+APK-julkaisukäännös:
+
+```bash
+./build_release.sh
+```
+
+## Dokumentaatio
+
+| Tiedosto | Sisältö |
+|---|---|
+| [docs/architecture.md](docs/architecture.md) | Arkkitehtuuri, tiedostorakenne, state management |
+| [docs/api.md](docs/api.md) | Kaikki API-endpointit ja rakenteet |
+| [docs/features.md](docs/features.md) | Ominaisuuksien toimintaperiaatteet ja laajennusohjeet |
+
+## Tekniset valinnat
+
+- **Flutter** + Dart — cross-platform mobiilikehitys
+- **Riverpod** — state management
+- **Dio** — HTTP-asiakas, keksien hallinta, automaattinen re-login
+- **flutter_secure_storage** — tunnusten turvallinen tallennus

@@ -40,6 +40,8 @@ class EvakaEndpoints {
 
   // --- Kalenteri ---
   static const String calendarEvents = '/api/citizen/calendar-events';
+  static const String calendarEventReservation =
+      '/api/citizen/calendar-event/reservation';
 
   // --- Liitteet ---
   static String attachmentDownload(String id, String filename) =>
@@ -49,6 +51,10 @@ class EvakaEndpoints {
   static const String holidayPeriod = '/api/citizen/holiday-period';
   static const String holidayPeriodQuestionnaire =
       '/api/citizen/holiday-period/questionnaire';
+  static String questionnaireOpenRange(String id) =>
+      '/api/citizen/holiday-period/questionnaire/open-range/$id';
+  static String questionnaireFixedPeriod(String id) =>
+      '/api/citizen/holiday-period/questionnaire/fixed-period/$id';
 
   // --- Etusivun badget ---
   static const String pedagogicalDocumentsUnreadCount =

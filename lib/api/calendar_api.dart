@@ -26,4 +26,30 @@ class CalendarApi {
         .map(CalendarEvent.fromJson)
         .toList();
   }
+
+  Future<void> bookDiscussionTime({
+    required String calendarEventTimeId,
+    required String childId,
+  }) async {
+    await _client.dio.post(
+      EvakaEndpoints.calendarEventReservation,
+      data: {
+        'calendarEventTimeId': calendarEventTimeId,
+        'childId': childId,
+      },
+    );
+  }
+
+  Future<void> cancelDiscussionTime({
+    required String calendarEventTimeId,
+    required String childId,
+  }) async {
+    await _client.dio.delete(
+      EvakaEndpoints.calendarEventReservation,
+      queryParameters: {
+        'calendarEventTimeId': calendarEventTimeId,
+        'childId': childId,
+      },
+    );
+  }
 }
