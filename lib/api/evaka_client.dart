@@ -2,6 +2,7 @@ import 'package:cookie_jar/cookie_jar.dart';
 import 'package:dio/dio.dart';
 import 'package:dio_cookie_manager/dio_cookie_manager.dart';
 
+import '../auth/secure_storage.dart';
 import 'endpoints.dart';
 
 class EvakaClient {
@@ -13,7 +14,7 @@ class EvakaClient {
   Dio get dio => _dio;
   CookieJar get cookieJar => _cookieJar;
 
-  factory EvakaClient.create() {
+  factory EvakaClient.create(SecureStorage storage) {
     final cookieJar = CookieJar();
     final dio = Dio(
       BaseOptions(
@@ -29,6 +30,57 @@ class EvakaClient {
         },
       ),
     )..interceptors.add(CookieManager(cookieJar));
+
+    dio.interceptors.add(InterceptorsWrapper(
+      onResponse: (response, handler) async {
+        if (response.statusCode != 401 ||
+            response.requestOptions.extra['_isRetry'] == true) {
+          handler.next(response);
+          return;
+        }
+
+        final creds = await storage.readCredentials();
+        if (creds == null) {
+          handler.reject(
+            DioException(
+              requestOptions: response.requestOptions,
+              response: response,
+              type: DioExceptionType.badResponse,
+              message: 'Istunto vanhentunut',
+            ),
+            true,
+          );
+          return;
+        }
+
+        try {
+          final loginResp = await dio.post(
+            EvakaEndpoints.weakLogin,
+            data: {'username': creds.email, 'password': creds.password},
+            options: Options(
+              contentType: Headers.jsonContentType,
+              extra: {'_isRetry': true},
+            ),
+          );
+          if (loginResp.statusCode != 200) throw Exception('login failed');
+
+          final retryResp = await dio.fetch(
+            response.requestOptions..extra['_isRetry'] = true,
+          );
+          handler.resolve(retryResp);
+        } catch (_) {
+          handler.reject(
+            DioException(
+              requestOptions: response.requestOptions,
+              response: response,
+              type: DioExceptionType.badResponse,
+              message: 'Istunto vanhentunut',
+            ),
+            true,
+          );
+        }
+      },
+    ));
 
     return EvakaClient._(dio, cookieJar);
   }

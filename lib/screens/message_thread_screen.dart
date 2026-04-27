@@ -52,7 +52,9 @@ class _MessageThreadScreenState extends ConsumerState<MessageThreadScreen> {
           overflow: TextOverflow.ellipsis,
         ),
       ),
-      body: Column(
+      body: SafeArea(
+        top: false,
+        child: Column(
         children: [
           Expanded(
             child: ListView.separated(
@@ -66,6 +68,7 @@ class _MessageThreadScreenState extends ConsumerState<MessageThreadScreen> {
           if (thread.messageType == 'MESSAGE')
             _ReplyComposer(thread: thread),
         ],
+      ),
       ),
     );
   }

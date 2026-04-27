@@ -11,7 +11,7 @@ import '../auth/auth_service.dart';
 import '../auth/secure_storage.dart';
 
 final evakaClientProvider = Provider<EvakaClient>((ref) {
-  return EvakaClient.create();
+  return EvakaClient.create(ref.watch(secureStorageProvider));
 });
 
 final secureStorageProvider = Provider<SecureStorage>((ref) {
