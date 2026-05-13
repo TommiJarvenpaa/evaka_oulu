@@ -55,7 +55,12 @@ class AuthService {
         'username': email,
         'password': password,
       },
-      options: Options(contentType: Headers.jsonContentType),
+      options: Options(
+        contentType: Headers.jsonContentType,
+        // Älä laukaise auto-relogia kirjautumiskutsusta itsestään —
+        // muuten väärät tunnukset käynnistäisivät rekursiivisen yrityksen.
+        extra: {EvakaClient.kSkipAuthRetry: true},
+      ),
     );
 
     if (resp.statusCode != 200) {
