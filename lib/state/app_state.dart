@@ -6,6 +6,7 @@ import '../api/evaka_client.dart';
 import '../api/messages_api.dart';
 import '../api/models/calendar_event.dart';
 import '../api/models/questionnaire.dart';
+import '../api/models/recipients.dart';
 import '../api/models/reservations.dart';
 import '../api/questionnaire_api.dart';
 import '../api/reservations_api.dart';
@@ -53,6 +54,11 @@ final receivedThreadsProvider =
 
 final messagesUnreadCountProvider = FutureProvider<int>((ref) async {
   return ref.watch(messagesApiProvider).getUnreadCount();
+});
+
+final messageRecipientsProvider =
+    FutureProvider<MessageRecipientsResponse>((ref) async {
+  return ref.watch(messagesApiProvider).getRecipients();
 });
 
 final reservationsApiProvider = Provider<ReservationsApi>((ref) {

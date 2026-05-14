@@ -38,6 +38,46 @@ class _MessageThreadScreenState extends ConsumerState<MessageThreadScreen> {
     }
   }
 
+  Future<void> _archive() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Arkistoidaanko keskustelu?'),
+        content: Text('"${widget.thread.title}" siirtyy arkistoon.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Peruuta'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Arkistoi'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
+    final messenger = ScaffoldMessenger.of(context);
+    final navigator = Navigator.of(context);
+
+    try {
+      await ref.read(messagesApiProvider).archiveThread(widget.thread.id);
+      if (!mounted) return;
+      ref.invalidate(receivedThreadsProvider);
+      ref.invalidate(messagesUnreadCountProvider);
+      navigator.pop();
+      messenger.showSnackBar(
+        const SnackBar(content: Text('Keskustelu arkistoitu')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      messenger.showSnackBar(
+        SnackBar(content: Text('Arkistointi epäonnistui: $e')),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final thread = widget.thread;
@@ -51,6 +91,13 @@ class _MessageThreadScreenState extends ConsumerState<MessageThreadScreen> {
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
         ),
+        actions: [
+          IconButton(
+            tooltip: 'Arkistoi',
+            icon: const Icon(Icons.archive_outlined),
+            onPressed: _archive,
+          ),
+        ],
       ),
       body: SafeArea(
         top: false,

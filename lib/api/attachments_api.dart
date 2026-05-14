@@ -34,4 +34,37 @@ class AttachmentsApi {
     await file.writeAsBytes(bytes, flush: true);
     return file.path;
   }
+
+  /// Lähettää tiedoston eVakaan multipart/form-data -muodossa ja palauttaa
+  /// luodun liitteen id:n. ID liitetään myöhemmin `createThread`-kutsun
+  /// `attachmentIds`-listaan jotta liite kiinnittyy luotavaan viestiin.
+  ///
+  /// Jos käyttäjä peruu lähetyksen, kutsu [deleteAttachment] orpouden
+  /// estämiseksi.
+  Future<String> uploadMessageAttachment({
+    required String filePath,
+    required String filename,
+  }) async {
+    final form = FormData.fromMap({
+      'file': await MultipartFile.fromFile(filePath, filename: filename),
+    });
+    final resp = await _client.dio.post(
+      EvakaEndpoints.messageAttachmentUpload,
+      data: form,
+      options: Options(
+        contentType: 'multipart/form-data',
+      ),
+    );
+    final data = resp.data;
+    if (data is String) {
+      // eVaka palauttaa joskus quotatun stringin: "id-uuid"
+      return data.replaceAll('"', '').trim();
+    }
+    if (data is Map && data['id'] is String) return data['id'] as String;
+    return data.toString().replaceAll('"', '').trim();
+  }
+
+  Future<void> deleteAttachment(String attachmentId) async {
+    await _client.dio.delete(EvakaEndpoints.attachmentDelete(attachmentId));
+  }
 }

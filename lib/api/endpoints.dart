@@ -21,12 +21,19 @@ class EvakaEndpoints {
   static const String messagesRecipients = '/api/citizen/messages/recipients';
   static const String messagesReceived = '/api/citizen/messages/received';
   static const String messagesUnreadCount = '/api/citizen/messages/unread-count';
+  static const String messagesNew = '/api/citizen/messages';
   static String markThreadRead(String threadId) =>
       '/api/citizen/messages/threads/$threadId/read';
   static String replyToThread(String threadId) =>
       '/api/citizen/messages/reply-to/$threadId';
   static String archiveThread(String threadId) =>
       '/api/citizen/messages/threads/$threadId/archive';
+
+  // --- Viestin liitteet ---
+  static const String messageAttachmentUpload =
+      '/api/citizen/attachments/messages';
+  static String attachmentDelete(String id) =>
+      '/api/citizen/attachments/$id';
 
   // Lapsen kuva
   static String childImage(String imageId) =>
