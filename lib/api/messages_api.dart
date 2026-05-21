@@ -25,20 +25,40 @@ class MessagesApi {
 
   final EvakaClient _client;
 
+  static const int _kPageSize = 10;
+
   Future<ThreadsPage> getReceivedThreads({int page = 1}) async {
     final resp = await _client.dio.get(
       EvakaEndpoints.messagesReceived,
-      queryParameters: {'page': page},
+      queryParameters: {'page': page, 'pageSize': _kPageSize},
     );
-    final data = asMap(resp.data);
-    final threads = (data['data'] as List)
+    return _parseThreadsPage(resp.data, page);
+  }
+
+  ThreadsPage _parseThreadsPage(dynamic raw, int page) {
+    final data = asMap(raw);
+
+    // Defensiivinen parsinta: backendin vastaus voi olla 400/404-virhe JSON-
+    // muodossa (esim. {"error": "...", "status": 400}) jolloin "data"-kenttää
+    // ei ole. Heitetään silloin selkeä virhe sen sijaan että ColdCast-crashaisi.
+    final dataRaw = data['data'];
+    if (dataRaw is! List) {
+      // Yritetään lukea backendin oma virhekenttä jos olemassa
+      final err = data['error'] ?? data['message'] ?? data['status'];
+      throw FormatException(
+        err == null
+            ? 'Odotettiin "data"-listaa, sai ${dataRaw.runtimeType}'
+            : 'Palvelinvirhe: $err',
+      );
+    }
+    final threads = dataRaw
         .cast<Map<String, dynamic>>()
         .map(MessageThread.fromJson)
         .toList();
     return ThreadsPage(
       threads: threads,
-      total: (data['total'] as num).toInt(),
-      pages: (data['pages'] as num).toInt(),
+      total: (data['total'] as num?)?.toInt() ?? threads.length,
+      pages: (data['pages'] as num?)?.toInt() ?? 1,
       page: page,
     );
   }
@@ -72,10 +92,7 @@ class MessagesApi {
   }) async {
     await _client.dio.post(
       EvakaEndpoints.replyToThread(threadId),
-      data: {
-        'content': content,
-        'recipientAccountIds': recipientAccountIds,
-      },
+      data: {'content': content, 'recipientAccountIds': recipientAccountIds},
     );
   }
 

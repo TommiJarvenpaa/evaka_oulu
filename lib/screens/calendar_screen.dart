@@ -3,6 +3,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
 import '../api/models/calendar_event.dart';
+import '../api/models/reservations.dart';
+import '../api/notifications_api.dart';
 import '../state/app_state.dart';
 
 class CalendarScreen extends ConsumerWidget {
@@ -12,7 +14,25 @@ class CalendarScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final async = ref.watch(calendarEventsProvider);
     final childrenAsync = ref.watch(reservationsProvider);
+    final dstNotifs =
+        ref.watch(dailyServiceTimeNotificationsProvider).asData?.value ??
+            const <DailyServiceTimeNotification>[];
 
+    return Column(
+      children: [
+        if (dstNotifs.isNotEmpty)
+          _DailyServiceTimeBanner(notifications: dstNotifs),
+        Expanded(child: _buildBody(context, ref, async, childrenAsync)),
+      ],
+    );
+  }
+
+  Widget _buildBody(
+    BuildContext context,
+    WidgetRef ref,
+    AsyncValue<List<CalendarEvent>> async,
+    AsyncValue<ReservationsResponse> childrenAsync,
+  ) {
     return async.when(
       loading: () => const Center(child: CircularProgressIndicator()),
       error: (e, _) => Center(
@@ -606,6 +626,112 @@ class _Attendees extends StatelessWidget {
             ),
           ),
       ],
+    );
+  }
+}
+
+/// Banner kun lapsen päivittäinen palveluaika on muuttunut backendissa.
+/// Kuittaus poistaa ilmoituksen listalta.
+class _DailyServiceTimeBanner extends ConsumerStatefulWidget {
+  const _DailyServiceTimeBanner({required this.notifications});
+
+  final List<DailyServiceTimeNotification> notifications;
+
+  @override
+  ConsumerState<_DailyServiceTimeBanner> createState() =>
+      _DailyServiceTimeBannerState();
+}
+
+class _DailyServiceTimeBannerState
+    extends ConsumerState<_DailyServiceTimeBanner> {
+  bool _dismissing = false;
+
+  Future<void> _dismiss() async {
+    final ids = widget.notifications.map((n) => n.id).toList();
+    setState(() => _dismissing = true);
+    try {
+      await ref
+          .read(notificationsApiProvider)
+          .dismissDailyServiceTimeNotifications(ids);
+      ref.invalidate(dailyServiceTimeNotificationsProvider);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Kuittaus epäonnistui: $e')),
+      );
+    } finally {
+      if (mounted) setState(() => _dismissing = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final count = widget.notifications.length;
+    // Etsi aikaisin dateFrom
+    final earliest = widget.notifications
+        .map((n) => n.dateFrom)
+        .whereType<DateTime>()
+        .toList()
+      ..sort();
+    final dateText = earliest.isEmpty
+        ? ''
+        : ' alkaen ${DateFormat('d.M.yyyy').format(earliest.first)}';
+    final mainText = count == 1
+        ? 'Lapsesi päivittäinen palveluaika on muuttunut$dateText'
+        : 'Lapsien päivittäiset palveluajat ovat muuttuneet$dateText ($count kpl)';
+    final hasDeletedReservations =
+        widget.notifications.any((n) => n.hasDeletedReservations);
+
+    return Material(
+      color: theme.colorScheme.tertiaryContainer,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 10, 8, 10),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(
+              Icons.schedule,
+              size: 20,
+              color: theme.colorScheme.onTertiaryContainer,
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    mainText,
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      fontWeight: FontWeight.w600,
+                      color: theme.colorScheme.onTertiaryContainer,
+                    ),
+                  ),
+                  if (hasDeletedReservations) ...[
+                    const SizedBox(height: 2),
+                    Text(
+                      'Osa varauksistasi on poistettu uuden palveluajan vuoksi.',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.colorScheme.onTertiaryContainer,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            TextButton(
+              onPressed: _dismissing ? null : _dismiss,
+              child: _dismissing
+                  ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Text('Kuittaa'),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

@@ -196,23 +196,41 @@ class _ChildDayRow extends StatelessWidget {
 
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          ChildImage(
-            imageId: child?.imageId,
-            fallbackLetter: name.isNotEmpty ? name[0] : '?',
-            radius: 14,
+          Row(
+            children: [
+              ChildImage(
+                imageId: child?.imageId,
+                fallbackLetter: name.isNotEmpty ? name[0] : '?',
+                radius: 14,
+              ),
+              const SizedBox(width: 8),
+              Icon(icon, size: 18, color: color),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(name, style: theme.textTheme.bodyMedium),
+              ),
+              Text(
+                label,
+                style: theme.textTheme.bodyMedium?.copyWith(color: color),
+              ),
+            ],
           ),
-          const SizedBox(width: 8),
-          Icon(icon, size: 18, color: color),
-          const SizedBox(width: 6),
-          Expanded(
-            child: Text(name, style: theme.textTheme.bodyMedium),
-          ),
-          Text(
-            label,
-            style: theme.textTheme.bodyMedium?.copyWith(color: color),
-          ),
+          if (childDay.hasAttendance)
+            Padding(
+              // Sisennys lapsen kuvan + ikonin perään, jotta toteutunut aika
+              // näyttää linjautuvan varatun ajan kanssa
+              padding: const EdgeInsets.only(left: 50, top: 2),
+              child: Text(
+                _attendanceLabel(childDay.attendances),
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                  fontStyle: FontStyle.italic,
+                ),
+              ),
+            ),
         ],
       ),
     );
@@ -504,6 +522,18 @@ String _capitalize(String s) =>
 String _trimSeconds(String t) {
   // "07:00" or "07:00:00" → "07:00"
   return t.length >= 5 ? t.substring(0, 5) : t;
+}
+
+/// Muotoile toteutuneet hoitoajat. Voi olla useita jaksoja (esim. hae
+/// puoleenpäivään, palaa iltapäiväksi).
+String _attendanceLabel(List<Attendance> attendances) {
+  if (attendances.isEmpty) return '';
+  final parts = attendances.map((a) {
+    final start = _trimSeconds(a.startTime);
+    final end = a.endTime == null ? '' : _trimSeconds(a.endTime!);
+    return a.isOngoing ? 'paikalla $start –' : '$start – $end';
+  }).join(', ');
+  return 'Toteutunut: $parts';
 }
 
 TimeOfDay? _parseHHmm(String s) {

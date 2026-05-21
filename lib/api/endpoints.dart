@@ -17,10 +17,14 @@ class EvakaEndpoints {
   static const String children = '/api/citizen/children';
 
   // --- Viestit ---
+  // HUOM: Oulun eVaka-fork ei sisällä /messages/sent-endpointtia (lisätty
+  // Espoon masteriin Oulun forkin jälkeen). Lähetetyt-näkymä toteutetaan
+  // client-puolella suodattamalla received-listasta.
   static const String messagesMyAccount = '/api/citizen/messages/my-account';
   static const String messagesRecipients = '/api/citizen/messages/recipients';
   static const String messagesReceived = '/api/citizen/messages/received';
-  static const String messagesUnreadCount = '/api/citizen/messages/unread-count';
+  static const String messagesUnreadCount =
+      '/api/citizen/messages/unread-count';
   static const String messagesNew = '/api/citizen/messages';
   static String markThreadRead(String threadId) =>
       '/api/citizen/messages/threads/$threadId/read';
@@ -32,8 +36,7 @@ class EvakaEndpoints {
   // --- Viestin liitteet ---
   static const String messageAttachmentUpload =
       '/api/citizen/attachments/messages';
-  static String attachmentDelete(String id) =>
-      '/api/citizen/attachments/$id';
+  static String attachmentDelete(String id) => '/api/citizen/attachments/$id';
 
   // Lapsen kuva
   static String childImage(String imageId) =>
@@ -74,5 +77,7 @@ class EvakaEndpoints {
       '/api/citizen/applications/by-guardian/notifications';
   static const String dailyServiceTimeNotifications =
       '/api/citizen/daily-service-time-notifications';
+  static const String dailyServiceTimeNotificationsDismiss =
+      '/api/citizen/daily-service-time-notifications/dismiss';
   static const String incomeExpiring = '/api/citizen/income/expiring';
 }

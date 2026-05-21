@@ -91,6 +91,7 @@ class ReservationChildDay {
     required this.shiftCare,
     required this.absence,
     required this.reservations,
+    required this.attendances,
     required this.holidayPeriodEffectType,
   });
 
@@ -102,12 +103,17 @@ class ReservationChildDay {
   final Absence? absence;
   final List<Reservation> reservations;
 
+  /// Toteutuneet (henkilöstön kirjaamat) sisään-/uloskirjautumiset.
+  /// `endTime == null` tarkoittaa että lapsi on parhaillaan paikalla.
+  final List<Attendance> attendances;
+
   /// "ReservationsClosed" | null
   final String? holidayPeriodEffectType;
 
   bool get hasReservation => reservations.isNotEmpty;
   bool get isAbsent => absence != null;
   bool get reservationsClosed => holidayPeriodEffectType == 'ReservationsClosed';
+  bool get hasAttendance => attendances.isNotEmpty;
 
   factory ReservationChildDay.fromJson(Map<String, dynamic> json) {
     final holidayEffect = json['holidayPeriodEffect'] as Map<String, dynamic>?;
@@ -122,7 +128,30 @@ class ReservationChildDay {
           .cast<Map<String, dynamic>>()
           .map(Reservation.fromJson)
           .toList(),
+      attendances: (json['attendances'] as List? ?? const [])
+          .cast<Map<String, dynamic>>()
+          .map(Attendance.fromJson)
+          .toList(),
       holidayPeriodEffectType: holidayEffect?['type'] as String?,
+    );
+  }
+}
+
+class Attendance {
+  Attendance({required this.startTime, required this.endTime});
+
+  /// "HH:mm" tai "HH:mm:ss"
+  final String startTime;
+
+  /// null kun lapsi vielä paikalla (ei uloskirjattu)
+  final String? endTime;
+
+  bool get isOngoing => endTime == null;
+
+  factory Attendance.fromJson(Map<String, dynamic> json) {
+    return Attendance(
+      startTime: (json['startTime'] ?? '') as String,
+      endTime: json['endTime'] as String?,
     );
   }
 }
