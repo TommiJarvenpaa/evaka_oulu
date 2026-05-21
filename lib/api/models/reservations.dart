@@ -149,9 +149,12 @@ class Attendance {
   bool get isOngoing => endTime == null;
 
   factory Attendance.fromJson(Map<String, dynamic> json) {
+    // eVaka palauttaa attendances:[{start, end}], ei {startTime, endTime}.
+    // Säilytetään silti vanhat fallback-avaimet siltä varalta että forkki
+    // poikkeaisi tästä jossakin endpointissa.
     return Attendance(
-      startTime: (json['startTime'] ?? '') as String,
-      endTime: json['endTime'] as String?,
+      startTime: (json['start'] ?? json['startTime'] ?? '') as String,
+      endTime: (json['end'] ?? json['endTime']) as String?,
     );
   }
 }

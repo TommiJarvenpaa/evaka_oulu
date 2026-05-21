@@ -217,6 +217,17 @@ final reservationsProvider = FutureProvider<ReservationsResponse>((ref) async {
   return ref.watch(reservationsApiProvider).getReservations(from: from, to: to);
 });
 
+/// Menneiden päivien toteutuneet hoitoajat — autoDispose, koska tätä avataan
+/// erillisestä historianäkymästä eikä tarvitse pitää muistissa kun se on
+/// suljettu. Hakee 90 päivää taaksepäin tähän päivään asti.
+final attendanceHistoryProvider =
+    FutureProvider.autoDispose<ReservationsResponse>((ref) async {
+  final now = DateTime.now();
+  final to = DateTime(now.year, now.month, now.day);
+  final from = to.subtract(const Duration(days: 90));
+  return ref.watch(reservationsApiProvider).getReservations(from: from, to: to);
+});
+
 final calendarApiProvider = Provider<CalendarApi>((ref) {
   return CalendarApi(ref.watch(evakaClientProvider));
 });

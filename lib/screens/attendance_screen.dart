@@ -7,6 +7,7 @@ import '../api/reservations_api.dart';
 import '../state/app_state.dart';
 import '../widgets/child_image.dart';
 import '../widgets/day_card.dart';
+import 'attendance_history_screen.dart';
 import 'bulk_reservation_screen.dart';
 
 class AttendanceScreen extends ConsumerWidget {
@@ -71,13 +72,41 @@ class _ReservationsList extends ConsumerWidget {
       },
       child: ListView.builder(
         padding: const EdgeInsets.only(bottom: 80),
-        itemCount: data.days.length,
+        itemCount: data.days.length + 1,
         itemBuilder: (context, i) {
-          final day = data.days[i];
+          if (i == 0) {
+            return const _HistoryButton();
+          }
+          final day = data.days[i - 1];
           return _DayCard(
             day: day,
             childrenById: childrenById,
             reservableRange: data.reservableRange,
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _HistoryButton extends StatelessWidget {
+  const _HistoryButton();
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Card(
+      margin: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+      child: ListTile(
+        leading: Icon(Icons.history, color: theme.colorScheme.primary),
+        title: const Text('Hoitoaikahistoria'),
+        subtitle: const Text('Aiempien päivien toteutuneet hoitoajat'),
+        trailing: const Icon(Icons.chevron_right),
+        onTap: () {
+          Navigator.of(context).push(
+            MaterialPageRoute(
+              builder: (_) => const AttendanceHistoryScreen(),
+            ),
           );
         },
       ),
@@ -101,7 +130,14 @@ class _DayCard extends ConsumerWidget {
     final theme = Theme.of(context);
     final weekday = DateFormat('EEEE', 'fi_FI').format(day.date);
     final dateStr = DateFormat('d.M.yyyy').format(day.date);
-    final isToday = _isSameDay(day.date, DateTime.now());
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final isToday = _isSameDay(day.date, now);
+    // Menneitä päiviä ei saa muokata: toteutuneet hoitoajat on jo kirjattu.
+    // reservationsProvider hakee from=today, joten näitä ei pitäisi koskaan
+    // päätyä tähän — suoja on belt-and-suspenders mahdollisten cache- tai
+    // konfiguraatiomuutosten varalta.
+    final isPast = day.date.isBefore(today);
     final isWeekend = day.date.weekday == DateTime.saturday ||
         day.date.weekday == DateTime.sunday;
     final notReservable = day.holiday || day.children.isEmpty;
@@ -115,7 +151,7 @@ class _DayCard extends ConsumerWidget {
       margin: const EdgeInsets.fromLTRB(12, 8, 12, 0),
       color: notReservable ? theme.colorScheme.surfaceContainerLow : null,
       child: InkWell(
-        onTap: notReservable
+        onTap: (notReservable || isPast)
             ? null
             : () => _openEditSheet(context, ref, day, childrenById, reservableRange),
         child: Padding(
