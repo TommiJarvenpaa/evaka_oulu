@@ -54,6 +54,11 @@ class EvakaClient {
       final creds = await storage.readCredentials();
       if (creds == null) return false;
       try {
+        // Tyhjennä vanha cookie ennen weak-login:ia: jos palvelin saa
+        // voimassaolevan cookien, se voi palauttaa 200 ilman Set-Cookie:a
+        // (sessio-rotaatio jää tekemättä) ja retry menee uudelleen 401:een.
+        // Fresh-client pakottaa palvelimen luomaan uuden sessionin.
+        await cookieJar.deleteAll();
         final resp = await dio.post(
           EvakaEndpoints.weakLogin,
           data: {'username': creds.email, 'password': creds.password},
@@ -119,7 +124,7 @@ class EvakaClient {
           opts.extra[_kAuthRetryCount] = retryCount + 1;
           // Pieni viive ennen retryä — antaa palvelimen istunto-tilan
           // stabiloitua weak-loginin jälkeen ja välttää hetkelliset 401:t.
-          await Future<void>.delayed(const Duration(milliseconds: 200));
+          await Future<void>.delayed(const Duration(milliseconds: 500));
           final retry = await dio.fetch(opts);
           handler.resolve(retry);
         } on DioException catch (e) {
